@@ -2,8 +2,9 @@ services:
   - type: web
     name: logger-data-separator
     runtime: python
-    plan: starter
+    plan: free
     region: frankfurt
+    branch: main
     buildCommand: pip install -r requirements.txt
     # One worker only: jobs and their progress live in this process's memory.
     # Threads handle the browser polling while a job runs. The timeout covers
