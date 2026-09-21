@@ -1,0 +1,5 @@
+flask==3.1.*
+pymupdf==1.28.*
+openpyxl==3.1.*
+xlsxwriter==3.2.*
+gunicorn==23.*

@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: logger-data-separator
+    runtime: python
+    plan: starter
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt
+    # One worker only: jobs and their progress live in this process's memory.
+    # Threads handle the browser polling while a job runs. The timeout covers
+    # long uploads; the job itself runs on a background thread.
+    startCommand: gunicorn app:app --workers 1 --threads 8 --timeout 600 --bind 0.0.0.0:$PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: CLOUD_MODE
+        value: "1"
+      - key: PYTHON_VERSION
+        value: "3.12.6"
+      - key: APP_PASSWORD
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true

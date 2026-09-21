@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Logger Data Separator</title>
+  <style>
+    :root {
+      --green: #217346;
+      --green-dark: #185c37;
+      --ink: #1f2933;
+      --muted: #5b6770;
+      --line: #d9e2ec;
+      --bg: #f4f7f5;
+      --card: #ffffff;
+      --red: #c00000;
+      --header: #305496;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Calibri, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    header {
+      background: var(--green);
+      color: white;
+      padding: 18px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 650;
+      letter-spacing: 0.2px;
+    }
+    header p {
+      margin: 4px 0 0;
+      font-size: 13px;
+      opacity: 0.92;
+    }
+    main {
+      max-width: 1180px;
+      margin: 24px auto 48px;
+      padding: 0 20px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 22px;
+      margin-bottom: 18px;
+    }
+    h2 {
+      margin: 0 0 8px;
+      font-size: 16px;
+    }
+    .hint {
+      color: var(--muted);
+      font-size: 13px;
+      margin: 0 0 16px;
+      line-height: 1.45;
+    }
+    .drop {
+      border: 1.5px dashed #9bb7a6;
+      background: #f8fbf9;
+      border-radius: 10px;
+      padding: 28px 16px;
+      text-align: center;
+      cursor: pointer;
+    }
+    .drop.drag {
+      background: #e8f5ee;
+      border-color: var(--green);
+    }
+    .drop strong { color: var(--green-dark); }
+    input[type="file"] { display: none; }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #c5d0d8;
+      border-radius: 7px;
+      font-size: 14px;
+    }
+    button {
+      background: var(--green);
+      color: white;
+      border: 0;
+      border-radius: 7px;
+      padding: 10px 18px;
+      font-size: 14px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    button.secondary {
+      background: white;
+      color: var(--green-dark);
+      border: 1px solid var(--green);
+    }
+    .files {
+      margin-top: 10px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .progress {
+      height: 8px;
+      background: #e4ece7;
+      border-radius: 99px;
+      overflow: hidden;
+      margin: 12px 0 8px;
+    }
+    .bar {
+      height: 100%;
+      width: 0;
+      background: var(--green);
+      transition: width 0.2s ease;
+    }
+    .status { font-size: 13px; color: var(--muted); }
+    .error { color: #9b1c1c; white-space: pre-wrap; }
+    .stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 12px 0;
+    }
+    .pill {
+      background: #eef6f1;
+      border: 1px solid #d5e6dc;
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 13px;
+    }
+    .tabs { display: flex; gap: 8px; margin: 12px 0; }
+    .tabs button {
+      background: #eef1f4;
+      color: var(--ink);
+      font-weight: 600;
+    }
+    .tabs button.active {
+      background: var(--header);
+      color: white;
+    }
+    .table-wrap {
+      overflow: auto;
+      max-height: 520px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+    table {
+      border-collapse: collapse;
+      min-width: 100%;
+      font-size: 12px;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      background: var(--header);
+      color: white;
+      padding: 7px 8px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    td {
+      border: 1px solid #ead1d1;
+      padding: 4px 8px;
+      text-align: center;
+      color: var(--red);
+      white-space: nowrap;
+    }
+    .actions { display: flex; gap: 10px; align-items: center; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Logger Data Separator</h1>
+      <p>Bulk PDF / Excel upload → one workbook with Temperature and Humidity sheets</p>
+    </div>
+  </header>
+  <main>
+    <section class="card">
+      <h2>1. Choose all your DL files</h2>
+      <p class="hint">
+        {% if cloud_mode %}
+        Pick every logger file (<b>DL 01, DL 02, … DL 272</b>) — PDF and Excel together is fine.
+        Use <b>Choose a whole folder</b> to send the entire DL folder in one go.
+        {% else %}
+        Paste the folder that holds every logger (<b>DL 01, DL 02, … DL 272</b>, PDF and Excel together is fine).
+        {% endif %}
+        Every logger becomes one column: <b>DL-1, DL-2, DL-3…</b>
+        The output workbook has two sheets, <b>Temperature</b> and <b>Humidity</b>,
+        both sharing the same DATE and Time columns.
+      </p>
+
+      {% if not cloud_mode %}
+      <div class="row">
+        <input id="folder" type="text" value="{{ default_folder }}" placeholder="C:\Users\...\Aramax WH" />
+        <button class="secondary" type="button" id="scanBtn">Check folder</button>
+      </div>
+      {% else %}
+      <input id="folder" type="hidden" value="" />
+      {% endif %}
+
+      <label class="drop" id="drop" style="margin-top:14px; display:block">
+        <strong>Drop your logger files here</strong> or click to choose them<br />
+        <span style="font-size:13px;color:#5b6770">Select them all with Ctrl+A — picking one file gives one column</span>
+        <input id="fileInput" type="file" multiple accept=".pdf,.xls,.xlsx" />
+      </label>
+      <div style="display:flex; gap:10px; margin-top:12px; flex-wrap:wrap;">
+        <button class="secondary" type="button" id="folderBtn">Choose a whole folder</button>
+        <input id="dirInput" type="file" webkitdirectory directory multiple style="display:none" />
+        {% if not cloud_mode %}
+        <button class="secondary" type="button" id="scanBtn2" style="display:none"></button>
+        {% endif %}
+      </div>
+
+      <div class="files" id="fileSummary">
+        {% if cloud_mode %}No files chosen yet.{% else %}Click <b>Check folder</b> to see how many loggers were found.{% endif %}
+      </div>
+      <div style="margin-top:16px">
+        <button id="runBtn" type="button">Separate all DLs</button>
+      </div>
+    </section>
+
+    <section class="card" id="progressCard" hidden>
+      <h2>2. Processing</h2>
+      <div class="progress"><div class="bar" id="bar"></div></div>
+      <div class="status" id="statusText">Starting…</div>
+      <div class="error" id="errorText"></div>
+    </section>
+
+    <section class="card" id="resultCard" hidden>
+      <h2>3. Result — same layout as the Excel screenshot</h2>
+      <div class="stats" id="stats"></div>
+      <div class="actions">
+        <a id="downloadLink"><button type="button">Download Excel</button></a>
+        <button class="secondary" type="button" id="showTemp">Temperature</button>
+        <button class="secondary" type="button" id="showHum">Humidity</button>
+      </div>
+      <p class="hint" id="warnText"></p>
+      <div class="table-wrap">
+        <table id="preview"></table>
+      </div>
+    </section>
+  </main>
+  <script>
+    const fileInput = document.getElementById("fileInput");
+    const dirInput = document.getElementById("dirInput");
+    const folderBtn = document.getElementById("folderBtn");
+    const scanBtn = document.getElementById("scanBtn");
+    const drop = document.getElementById("drop");
+    const fileSummary = document.getElementById("fileSummary");
+    const folder = document.getElementById("folder");
+    const runBtn = document.getElementById("runBtn");
+    const progressCard = document.getElementById("progressCard");
+    const resultCard = document.getElementById("resultCard");
+    const bar = document.getElementById("bar");
+    const statusText = document.getElementById("statusText");
+    const errorText = document.getElementById("errorText");
+    const stats = document.getElementById("stats");
+    const preview = document.getElementById("preview");
+    const downloadLink = document.getElementById("downloadLink");
+    const warnText = document.getElementById("warnText");
+    let selectedFiles = [];
+    let lastPreview = null;
+    let sheet = "temp";
+
+    drop.addEventListener("click", () => fileInput.click());
+    drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("drag"); });
+    drop.addEventListener("dragleave", () => drop.classList.remove("drag"));
+    drop.addEventListener("drop", (e) => {
+      e.preventDefault();
+      drop.classList.remove("drag");
+      selectedFiles = [...e.dataTransfer.files];
+      fileSummary.textContent = selectedFiles.length + " file(s) selected";
+    });
+    fileInput.addEventListener("change", () => {
+      selectedFiles = [...fileInput.files];
+      fileSummary.textContent = selectedFiles.length + " file(s) selected — all will become DL columns";
+    });
+    folderBtn.addEventListener("click", () => dirInput.click());
+    dirInput.addEventListener("change", () => {
+      selectedFiles = [...dirInput.files].filter((f) => /\.(pdf|xls|xlsx)$/i.test(f.name));
+      fileSummary.textContent = selectedFiles.length + " DL file(s) from folder — all will be used";
+    });
+
+    runBtn.addEventListener("click", startJob);
+    if (scanBtn) scanBtn.addEventListener("click", scanFolder);
+
+    async function scanFolder() {
+      if (!folder.value.trim()) {
+        fileSummary.textContent = "Enter a folder path first.";
+        return;
+      }
+      fileSummary.textContent = "Checking folder…";
+      const data = new FormData();
+      data.append("folder", folder.value.trim());
+      const res = await fetch("/api/scan", { method: "POST", body: data });
+      const json = await res.json();
+      if (!json.ok) {
+        fileSummary.textContent = json.error;
+        return;
+      }
+      fileSummary.innerHTML =
+        "<b>" + json.loggers + " loggers</b> found in " + json.files +
+        " files — " + json.sample.join(", ") + " … " + json.last +
+        ". All of them will go into the Excel.";
+    }
+    document.getElementById("showTemp").addEventListener("click", () => { sheet = "temp"; renderPreview(); });
+    document.getElementById("showHum").addEventListener("click", () => { sheet = "rh"; renderPreview(); });
+
+    const UPLOAD_CHUNK = 15;
+
+    async function uploadInBatches() {
+      // A whole DL folder is ~140 MB; sending it as one request is fragile,
+      // so files go up a handful at a time against one batch id.
+      const res = await fetch("/api/batch", { method: "POST" });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || "Could not start upload");
+      const batchId = json.batch_id;
+
+      for (let i = 0; i < selectedFiles.length; i += UPLOAD_CHUNK) {
+        const slice = selectedFiles.slice(i, i + UPLOAD_CHUNK);
+        const data = new FormData();
+        slice.forEach((f) => data.append("files", f));
+        const up = await fetch("/api/batch/" + batchId, { method: "POST", body: data });
+        const upJson = await up.json();
+        if (!upJson.ok) throw new Error(upJson.error || "Upload failed");
+        const sent = Math.min(i + slice.length, selectedFiles.length);
+        bar.style.width = Math.round((sent / selectedFiles.length) * 40) + "%";
+        statusText.textContent = `Uploading ${sent} of ${selectedFiles.length} files…`;
+      }
+      return batchId;
+    }
+
+    async function startJob() {
+      progressCard.hidden = false;
+      resultCard.hidden = true;
+      errorText.textContent = "";
+      runBtn.disabled = true;
+      statusText.textContent = "Starting…";
+      bar.style.width = "5%";
+
+      try {
+        const data = new FormData();
+        if (selectedFiles.length) {
+          const batchId = await uploadInBatches();
+          data.append("batch_id", batchId);
+        }
+        if (folder.value.trim()) data.append("folder", folder.value.trim());
+
+        const res = await fetch("/api/process", { method: "POST", body: data });
+        const json = await res.json();
+        if (!json.ok) {
+          errorText.textContent = json.error || "Could not start";
+          runBtn.disabled = false;
+          return;
+        }
+        statusText.textContent = "Reading loggers… a full folder of ~270 takes about 3 to 4 minutes. Keep this page open.";
+        poll(json.job_id);
+      } catch (err) {
+        errorText.textContent = err.message || String(err);
+        runBtn.disabled = false;
+      }
+    }
+
+    async function poll(jobId) {
+      const res = await fetch("/api/status/" + jobId);
+      const job = await res.json();
+      const total = job.total || 1;
+      const current = job.current || 0;
+      bar.style.width = Math.max(8, Math.round((current / total) * 100)) + "%";
+      statusText.textContent = job.message || job.status;
+      if (job.status === "error") {
+        errorText.textContent = job.error || "Processing failed";
+        runBtn.disabled = false;
+        return;
+      }
+      if (job.status === "done") {
+        bar.style.width = "100%";
+        showResult(job);
+        runBtn.disabled = false;
+        return;
+      }
+      setTimeout(() => poll(jobId), 700);
+    }
+
+    function showResult(job) {
+      resultCard.hidden = false;
+      lastPreview = job;
+      sheet = "temp";
+      stats.innerHTML = `
+        <span class="pill">${job.stats.loggers} loggers (columns)</span>
+        <span class="pill">${job.stats.rows} time rows</span>
+        <span class="pill">${job.stats.start} → ${job.stats.end}</span>
+      ` + (job.stats.loggers < 2
+        ? `<span class="pill" style="background:#fdeaea;border-color:#f0c2c2">Only ${job.stats.loggers} logger — use the folder path to get all of them</span>`
+        : "");
+      downloadLink.href = "/download/" + job.download;
+      warnText.textContent = (job.warnings && job.warnings.length)
+        ? ("Skipped / warnings: " + job.warnings.slice(0, 8).join(" | "))
+        : "Sheets: Temperature, Humidity. Columns: DATE, Time, then DL-1, DL-2, …";
+      renderPreview();
+    }
+
+    function renderPreview() {
+      if (!lastPreview) return;
+      const loggers = lastPreview.preview_loggers || [];
+      const rows = lastPreview.preview || [];
+      let html = "<thead><tr><th>DATE</th><th>Time</th>";
+      loggers.forEach((n) => html += `<th>${n}</th>`);
+      html += "</tr></thead><tbody>";
+      rows.forEach((row) => {
+        html += `<tr><td>${row.DATE}</td><td>${row.Time}</td>`;
+        loggers.forEach((n) => {
+          const v = (sheet === "temp" ? row.temp : row.rh)[n];
+          html += `<td>${v == null ? "" : Number(v).toFixed(1)}</td>`;
+        });
+        html += "</tr>";
+      });
+      html += "</tbody>";
+      preview.innerHTML = html;
+    }
+  </script>
+</body>
+</html>
