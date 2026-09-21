@@ -140,7 +140,14 @@ def run_job(job_id: str, files: list[Path], batch_dir: Path | None = None) -> No
         out_name = f"Temperature_Humidity_{stamp}.xlsx"
         out_path = OUTPUT_DIR / out_name
         _update_job(job_id, message="Writing Excel workbook...")
-        write_workbook(out_path, loggers, timestamps, temps, hums)
+        write_workbook(
+            out_path,
+            loggers,
+            timestamps,
+            temps,
+            hums,
+            on_progress=lambda message: _update_job(job_id, message=message),
+        )
 
         preview_rows = 40
         preview_loggers = loggers[:18]
