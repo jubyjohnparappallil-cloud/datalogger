@@ -5,13 +5,15 @@ from __future__ import annotations
 import math
 import re
 from array import array
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 
 import pymupdf
 
 EPOCH = datetime(2000, 1, 1)
+EPOCH_ORD = date(2000, 1, 1).toordinal()
+TEXT_FLAGS = getattr(pymupdf, "TEXTFLAGS_TEXT", 195)
 
 ROW_RE = re.compile(
     r"(\d{2}[-/.]\d{2}[-/.]\d{4})\s+"
@@ -40,41 +42,53 @@ def logger_sort_key(name: str) -> tuple:
     return (1, 0, name.lower())
 
 
-def _parse_datetime(date_s: str, time_s: str) -> datetime | None:
-    parsed_date = None
-    for fmt in DATE_FORMATS:
-        try:
-            parsed_date = datetime.strptime(date_s, fmt)
-            break
-        except ValueError:
-            continue
-    if parsed_date is None:
-        return None
+def _minutes_since_epoch(date_s: str, time_s: str) -> int | None:
+    """DD-MM-YYYY / DD/MM/YYYY / YYYY-MM-DD plus HH:MM, no strptime."""
     try:
-        if len(time_s) == 5:
-            parsed_time = datetime.strptime(time_s, "%H:%M")
+        if date_s[2] in "-/.":
+            first, second, year = int(date_s[0:2]), int(date_s[3:5]), int(date_s[6:10])
+            day, month = (second, first) if second > 12 and first <= 12 else (first, second)
         else:
-            parsed_time = datetime.strptime(time_s, "%H:%M:%S")
-    except ValueError:
+            year, month, day = int(date_s[0:4]), int(date_s[5:7]), int(date_s[8:10])
+        hour, minute = int(time_s[0:2]), int(time_s[3:5])
+        return (date(year, month, day).toordinal() - EPOCH_ORD) * 1440 + hour * 60 + minute
+    except (ValueError, IndexError):
         return None
-    return datetime.combine(parsed_date.date(), parsed_time.time())
 
 
-def parse_pdf(path: Path) -> list[tuple[datetime, float, float]]:
-    records: list[tuple[datetime, float, float]] = []
+def _parse_datetime(date_s: str, time_s: str) -> datetime | None:
+    minutes = _minutes_since_epoch(date_s, time_s)
+    if minutes is None:
+        return None
+    return EPOCH + timedelta(minutes=minutes)
+
+
+def _append_text_rows(text: str, minutes: array, temps: array, hums: array) -> None:
+    for date_s, time_s, temp_s, rh_s in ROW_RE.findall(text):
+        minute = _minutes_since_epoch(date_s, time_s)
+        if minute is None:
+            continue
+        minutes.append(minute)
+        temps.append(float(temp_s))
+        hums.append(float(rh_s))
+
+
+def parse_pdf_columns(path: Path) -> tuple[array, array, array]:
+    minutes: array = array("i")
+    temps: array = array("f")
+    hums: array = array("f")
     doc = pymupdf.open(path)
     try:
         for page in doc:
-            text = page.get_text("text") or ""
-            for date_s, time_s, temp_s, rh_s in ROW_RE.findall(text):
-                dt = _parse_datetime(date_s, time_s)
-                if dt is None:
-                    continue
-                records.append((dt, float(temp_s), float(rh_s)))
+            _append_text_rows(page.get_text("text", flags=TEXT_FLAGS) or "", minutes, temps, hums)
     finally:
         doc.close()
-    records.sort(key=lambda row: row[0])
-    return records
+    return minutes, temps, hums
+
+
+def parse_pdf(path: Path) -> list[tuple[datetime, float, float]]:
+    minutes, temps, hums = parse_pdf_columns(path)
+    return [(EPOCH + timedelta(minutes=m), t, h) for m, t, h in zip(minutes, temps, hums)]
 
 
 def parse_excel(path: Path) -> list[tuple[datetime, float, float]]:
@@ -160,6 +174,53 @@ def parse_logger_file(path: Path) -> list[tuple[datetime, float, float]]:
     if suffix in {".xls", ".xlsx"}:
         return parse_excel(path)
     raise ValueError(f"Unsupported file type: {path.suffix}")
+
+
+def parse_logger_columns(path: Path) -> tuple[array, array, array]:
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        return parse_pdf_columns(path)
+    if suffix in {".xls", ".xlsx"}:
+        return records_to_columns(parse_excel(path))
+    raise ValueError(f"Unsupported file type: {path.suffix}")
+
+
+def sibling_logger_file(path: Path) -> Path | None:
+    """If one format comes back empty, try the logger's other file."""
+    if path.suffix.lower() == ".pdf":
+        for ext in (".xls", ".xlsx"):
+            excel = path.with_suffix(ext)
+            if excel.exists():
+                return excel
+        return None
+    pdf = path.with_suffix(".pdf")
+    return pdf if pdf.exists() else None
+
+
+def parse_one_worker(path_str: str):
+    """Process-pool entry: parse one logger file into compact arrays."""
+    path = Path(path_str)
+    logger = logger_column_name(path)
+    try:
+        columns = parse_logger_columns(path)
+        if columns[0]:
+            return logger, columns, None
+        sibling = sibling_logger_file(path)
+        if sibling is not None:
+            columns = parse_logger_columns(sibling)
+            if columns[0]:
+                return logger, columns, None
+        return logger, None, f"{path.name}: no temperature/humidity readings found"
+    except Exception as exc:
+        sibling = sibling_logger_file(path)
+        if sibling is not None:
+            try:
+                columns = parse_logger_columns(sibling)
+                if columns[0]:
+                    return logger, columns, None
+            except Exception:
+                pass
+        return logger, None, f"{path.name}: {exc}"
 
 
 def records_to_columns(records: list[tuple[datetime, float, float]]):

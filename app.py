@@ -8,7 +8,8 @@ import shutil
 import threading
 import traceback
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -29,8 +30,7 @@ from parser import (
     logger_column_name,
     logger_sort_key,
     merge_columns,
-    parse_logger_file,
-    records_to_columns,
+    parse_one_worker,
 )
 
 APP_DIR = Path(__file__).resolve().parent
@@ -52,7 +52,7 @@ app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.jinja_env.auto_reload = True
 
 DEFAULT_FOLDER = r"C:\Users\Juby John\Downloads\Aramax WH\Aramax WH"
-WORKERS = min(12, max(4, (os.cpu_count() or 4)))
+WORKERS = min(12, max(4, os.cpu_count() or 4))
 
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
@@ -95,43 +95,6 @@ def _dedupe_prefer_pdf(files: list[Path]) -> list[Path]:
     return sorted(by_logger.values(), key=lambda p: logger_sort_key(logger_column_name(p)))
 
 
-def _parse_one(path: Path):
-    """Parse one logger and hand back compact arrays, never the raw tuples."""
-    logger = logger_column_name(path)
-    try:
-        records = parse_logger_file(path)
-        if records:
-            return logger, records_to_columns(records), None
-        sibling = _sibling_fallback(path)
-        if sibling is not None:
-            records = parse_logger_file(sibling)
-            if records:
-                return logger, records_to_columns(records), None
-        return logger, None, f"{path.name}: no temperature/humidity readings found"
-    except Exception as exc:
-        sibling = _sibling_fallback(path)
-        if sibling is not None:
-            try:
-                records = parse_logger_file(sibling)
-                if records:
-                    return logger, records_to_columns(records), None
-            except Exception:
-                pass
-        return logger, None, f"{path.name}: {exc}"
-
-
-def _sibling_fallback(path: Path) -> Path | None:
-    """If one format comes back empty, try the logger's other file."""
-    if path.suffix.lower() == ".pdf":
-        for ext in (".xls", ".xlsx"):
-            excel = path.with_suffix(ext)
-            if excel.exists():
-                return excel
-        return None
-    pdf = path.with_suffix(".pdf")
-    return pdf if pdf.exists() else None
-
-
 def run_job(job_id: str, files: list[Path], batch_dir: Path | None = None) -> None:
     try:
         files = _dedupe_prefer_pdf(files)
@@ -143,8 +106,9 @@ def run_job(job_id: str, files: list[Path], batch_dir: Path | None = None) -> No
         file_columns: dict[str, tuple] = {}
         warnings: list[str] = []
 
-        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-            futures = {pool.submit(_parse_one, path): path for path in files}
+        ctx = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=WORKERS, mp_context=ctx) as pool:
+            futures = {pool.submit(parse_one_worker, str(path)): path for path in files}
             done = 0
             for future in as_completed(futures):
                 logger, columns, error = future.result()
@@ -337,7 +301,7 @@ def api_process():
 
     job_id = uuid.uuid4().hex
     _update_job(job_id, status="queued", current=0, total=len(saved), message="Queued")
-    thread = threading.Thread(target=run_job, args=(job_id, saved, batch_dir), daemon=True)
+    thread = threading.Thread(target=run_job, args=(job_id, saved, batch_dir), daemon=False)
     thread.start()
     return jsonify({"ok": True, "job_id": job_id})
 

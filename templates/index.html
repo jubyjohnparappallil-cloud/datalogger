@@ -369,7 +369,7 @@
           runBtn.disabled = false;
           return;
         }
-        statusText.textContent = "Reading loggers… a full folder of ~270 takes about 3 to 4 minutes. Keep this page open.";
+        statusText.textContent = "Reading loggers in parallel. Keep this page open.";
         poll(json.job_id);
       } catch (err) {
         errorText.textContent = err.message || String(err);
