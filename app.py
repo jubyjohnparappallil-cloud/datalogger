@@ -92,7 +92,7 @@ def _collect_source_files(folder: Path) -> list[Path]:
 
 
 def _dedupe_prefer_pdf(files: list[Path]) -> list[Path]:
-    """One source per logger. PDFs win: they parse ~3x faster than the Excel twin."""
+    """One source per logger. Render prefers Excel; desktop prefers PDF."""
     by_logger: dict[str, Path] = {}
     for path in files:
         key = logger_column_name(path)
@@ -100,7 +100,12 @@ def _dedupe_prefer_pdf(files: list[Path]) -> list[Path]:
         if existing is None:
             by_logger[key] = path
             continue
-        if path.suffix.lower() == ".pdf" and existing.suffix.lower() != ".pdf":
+        path_excel = path.suffix.lower() in {".xls", ".xlsx"}
+        existing_excel = existing.suffix.lower() in {".xls", ".xlsx"}
+        if CLOUD_MODE:
+            if path_excel and not existing_excel:
+                by_logger[key] = path
+        elif path.suffix.lower() == ".pdf" and existing.suffix.lower() != ".pdf":
             by_logger[key] = path
     return sorted(by_logger.values(), key=lambda p: logger_sort_key(logger_column_name(p)))
 
@@ -353,7 +358,7 @@ def api_status(job_id: str):
 
 @app.get("/healthz")
 def healthz():
-    return "ok v6", 200
+    return "ok v7", 200
 
 
 @app.get("/download/<name>")

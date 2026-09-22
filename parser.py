@@ -21,6 +21,13 @@ ROW_RE = re.compile(
     r"(-?\d+\.?\d*)\s+"
     r"(\d+\.?\d*)"
 )
+# Linux/MuPDF sometimes drops spaces: 21-04-202611:00:0024.051.7
+ROW_RE_COMPACT = re.compile(
+    r"(\d{2}[-/.]\d{2}[-/.]\d{4})"
+    r"(\d{2}:\d{2}(?::\d{2})?)"
+    r"(-?\d+\.\d+)"
+    r"(\d+\.\d+)"
+)
 
 DL_NAME_RE = re.compile(r"(?i)\bDL[\s._-]*(\d+)\b")
 
@@ -64,7 +71,10 @@ def _parse_datetime(date_s: str, time_s: str) -> datetime | None:
 
 
 def _append_text_rows(text: str, minutes: array, temps: array, hums: array) -> None:
-    for date_s, time_s, temp_s, rh_s in ROW_RE.findall(text):
+    matches = ROW_RE.findall(text)
+    if not matches:
+        matches = ROW_RE_COMPACT.findall(re.sub(r"\s+", "", text))
+    for date_s, time_s, temp_s, rh_s in matches:
         minute = _minutes_since_epoch(date_s, time_s)
         if minute is None:
             continue
