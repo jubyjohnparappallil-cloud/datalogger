@@ -12,6 +12,7 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
+from zipfile import ZipFile
 
 from flask import (
     Flask,
@@ -66,6 +67,22 @@ def _safe_upload_name(filename: str) -> str | None:
     if not DL_NAME_RE.search(Path(name).stem):
         return None
     return name
+
+
+def _extract_logger_zip(zip_path: Path, dest: Path) -> list[Path]:
+    saved: list[Path] = []
+    dest.mkdir(parents=True, exist_ok=True)
+    with ZipFile(zip_path) as archive:
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            name = _safe_upload_name(info.filename)
+            if not name:
+                continue
+            target = dest / name
+            target.write_bytes(archive.read(info.filename))
+            saved.append(target)
+    return saved
 
 
 def _clean(value: float) -> float | None:
@@ -266,18 +283,31 @@ def api_batch_add(batch_id: str):
         return jsonify({"ok": False, "error": "Upload session expired. Start again."}), 400
 
     added = 0
+    sizes: list[int] = []
     for item in request.files.getlist("files"):
         if not item.filename:
             continue
-        name = _safe_upload_name(item.filename)
+        raw_name = Path(str(item.filename).replace("\\", "/")).name
+        payload = item.read()
+        if raw_name.lower().endswith(".zip"):
+            tmp = batch / raw_name
+            tmp.write_bytes(payload)
+            extracted = _extract_logger_zip(tmp, batch)
+            tmp.unlink(missing_ok=True)
+            added += len(extracted)
+            sizes.extend(path.stat().st_size for path in extracted)
+            continue
+        name = _safe_upload_name(raw_name)
         if not name:
             continue
-        payload = item.read()
-        (batch / name).write_bytes(payload)
+        dest = batch / name
+        dest.write_bytes(payload)
         added += 1
+        sizes.append(len(payload))
 
-    total = sum(1 for _ in batch.iterdir())
-    return jsonify({"ok": True, "added": added, "total": total})
+    total = sum(1 for path in batch.iterdir() if path.is_file())
+    sample = sorted(sizes, reverse=True)[:3]
+    return jsonify({"ok": True, "added": added, "total": total, "largest": sample})
 
 
 @app.post("/api/scan")
@@ -315,6 +345,13 @@ def api_process():
         if not batch_dir.is_dir():
             return jsonify({"ok": False, "error": "Upload session expired. Start again."}), 400
         saved.extend(p for p in batch_dir.iterdir() if p.is_file())
+        leftover_zips = [path for path in saved if path.suffix.lower() == ".zip"]
+        if leftover_zips:
+            extracted: list[Path] = []
+            for zip_path in leftover_zips:
+                extracted.extend(_extract_logger_zip(zip_path, batch_dir))
+                zip_path.unlink(missing_ok=True)
+            saved = [path for path in saved if path.suffix.lower() != ".zip"] + extracted
 
     for item in request.files.getlist("files"):
         if not item.filename:
@@ -373,7 +410,7 @@ def api_status(job_id: str):
 
 @app.get("/healthz")
 def healthz():
-    return "ok v9", 200
+    return "ok v11", 200
 
 
 @app.get("/download/<name>")

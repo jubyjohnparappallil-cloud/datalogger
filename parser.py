@@ -17,19 +17,20 @@ EPOCH = datetime(2000, 1, 1)
 EPOCH_ORD = date(2000, 1, 1).toordinal()
 TEXT_FLAGS = getattr(pymupdf, "TEXTFLAGS_TEXT", 195)
 
+DATE_TOKEN = r"(?:\d{4}[-/.]\d{2}[-/.]\d{2}|\d{2}[-/.]\d{2}[-/.]\d{4})"
 ROW_RE = re.compile(
-    r"(\d{2}[-/.]\d{2}[-/.]\d{4})\s+"
+    rf"({DATE_TOKEN})\s+"
     r"(\d{2}:\d{2}(?::\d{2})?)\s+"
     r"(-?\d+\.?\d*)\s+"
     r"(\d+\.?\d*)"
 )
-# Linux/MuPDF sometimes drops spaces: 21-04-202611:00:0024.051.7
 ROW_RE_COMPACT = re.compile(
-    r"(\d{2}[-/.]\d{2}[-/.]\d{4})"
+    rf"({DATE_TOKEN})"
     r"(\d{2}:\d{2}(?::\d{2})?)"
     r"(-?\d+\.\d+)"
     r"(\d+\.\d+)"
 )
+DATETIME_RE = re.compile(rf"({DATE_TOKEN})\s+(\d{{2}}:\d{{2}}(?::\d{{2}})?)")
 
 DL_NAME_RE = re.compile(r"(?i)\bDL[\s._-]*(\d+)\b")
 
@@ -133,7 +134,8 @@ def _parse_elitech_xlsx(data: bytes) -> list[tuple[datetime, float, float]]:
     best: list[tuple[datetime, float, float]] = []
     with ZipFile(BytesIO(data)) as archive:
         for name in archive.namelist():
-            if not name.startswith("xl/worksheets/sheet") or not name.endswith(".xml"):
+            norm = name.replace("\\", "/").lower()
+            if "/worksheets/sheet" not in norm or not norm.endswith(".xml"):
                 continue
             xml = archive.read(name).decode("utf-8", errors="replace").replace("\ufeff", "")
             records = _records_from_sheet_xml(xml)
@@ -276,7 +278,7 @@ def _coerce_excel_datetime(value) -> datetime | None:
     if value is None:
         return None
     text = str(value).strip()
-    match = re.match(r"(\d{2}[-/.]\d{2}[-/.]\d{4})\s+(\d{2}:\d{2}(?::\d{2})?)", text)
+    match = DATETIME_RE.match(text)
     if match:
         return _parse_datetime(match.group(1), match.group(2))
     return None

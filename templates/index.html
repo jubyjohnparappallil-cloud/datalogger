@@ -187,7 +187,7 @@
   <header>
     <div>
       <h1>Logger Data Separator</h1>
-      <p>Live on Render · upload the DL folder · keep this tab open · v9</p>
+      <p>Live on Render · upload a ZIP of the DL folder · v11</p>
     </div>
   </header>
   <main>
@@ -195,9 +195,10 @@
       <h2>1. Choose all your DL files</h2>
       <p class="hint">
         {% if cloud_mode %}
-        Click <b>Choose a whole folder</b> and pick the folder that has <b>DL 01, DL 02, …</b>
-        The live host uses the Excel file for each logger (more reliable than the PDF).
-        A full set can take several minutes on this host. <b>Keep this tab open</b> until Download Excel appears.
+        On your PC, right-click the folder that has <b>DL 01, DL 02, …</b> and choose
+        <b>Compress to ZIP</b> / <b>Send to → Compressed (zipped) folder</b>.
+        Then click <b>Upload ZIP</b> and pick that one zip file.
+        <b>Keep this tab open</b> until Download Excel appears.
         {% else %}
         Paste the folder that holds every logger (<b>DL 01, DL 02, … DL 272</b>, PDF and Excel together is fine).
         {% endif %}
@@ -218,9 +219,11 @@
       <label class="drop" id="drop" style="margin-top:14px; display:block">
         <strong>Drop your logger files here</strong> or click to choose them<br />
         <span style="font-size:13px;color:#5b6770">Select them all with Ctrl+A — picking one file gives one column</span>
-        <input id="fileInput" type="file" multiple accept=".pdf,.xls,.xlsx" />
+        <input id="fileInput" type="file" multiple accept=".pdf,.xls,.xlsx,.zip" />
       </label>
       <div style="display:flex; gap:10px; margin-top:12px; flex-wrap:wrap;">
+        <button type="button" id="zipBtn">Upload ZIP</button>
+        <input id="zipInput" type="file" accept=".zip" style="display:none" />
         <button class="secondary" type="button" id="folderBtn">Choose a whole folder</button>
         <input id="dirInput" type="file" webkitdirectory directory multiple style="display:none" />
         {% if not cloud_mode %}
