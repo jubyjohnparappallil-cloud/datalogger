@@ -6,8 +6,10 @@ import math
 import re
 from array import array
 from datetime import date, datetime, timedelta
+from html import unescape
 from io import BytesIO
 from pathlib import Path
+from zipfile import ZipFile
 
 import pymupdf
 
@@ -104,68 +106,142 @@ def parse_pdf(path: Path) -> list[tuple[datetime, float, float]]:
     return [(EPOCH + timedelta(minutes=m), t, h) for m, t, h in zip(minutes, temps, hums)]
 
 
+_INLINE_CELL_RE = re.compile(
+    r'<c r="([A-Z]+)(\d+)"[^>]*>\s*<is>\s*<t[^>]*>(.*?)</t>',
+    re.I | re.S,
+)
+_VALUE_CELL_RE = re.compile(
+    r'<c r="([A-Z]+)(\d+)"[^>]*>\s*<v>(.*?)</v>',
+    re.I | re.S,
+)
+
+
 def parse_excel(path: Path) -> list[tuple[datetime, float, float]]:
+    data = path.read_bytes()
+    if data[:2] == b"PK":
+        records = _parse_elitech_xlsx(data)
+        if records:
+            return records
+    return _parse_excel_openpyxl(data)
+
+
+def _parse_elitech_xlsx(data: bytes) -> list[tuple[datetime, float, float]]:
+    """Read Elitech xlsx-in-.xls files from sheet XML. Avoids openpyxl dimension bugs."""
+    best: list[tuple[datetime, float, float]] = []
+    with ZipFile(BytesIO(data)) as archive:
+        for name in archive.namelist():
+            if not name.startswith("xl/worksheets/sheet") or not name.endswith(".xml"):
+                continue
+            xml = archive.read(name).decode("utf-8", errors="replace").replace("\ufeff", "")
+            records = _records_from_sheet_xml(xml)
+            if len(records) > len(best):
+                best = records
+    return best
+
+
+def _records_from_sheet_xml(xml: str) -> list[tuple[datetime, float, float]]:
+    by_row: dict[int, dict[str, str]] = {}
+    for col, row, text in _INLINE_CELL_RE.findall(xml):
+        by_row.setdefault(int(row), {})[col] = unescape(text)
+    if not by_row:
+        for col, row, text in _VALUE_CELL_RE.findall(xml):
+            by_row.setdefault(int(row), {})[col] = unescape(text)
+    if not by_row:
+        return []
+
+    header_row = min(by_row)
+    header = by_row[header_row]
+    cols = sorted(header)
+    time_col = temp_col = rh_col = None
+    for col in cols:
+        label = header[col].strip().lower()
+        if time_col is None and ("time" in label or "date" in label):
+            time_col = col
+        elif temp_col is None and ("temp" in label or "°c" in label or "&#176;" in label or label in {"c", "℃"}):
+            temp_col = col
+        elif rh_col is None and ("humid" in label or "%rh" in label or label.endswith("rh")):
+            rh_col = col
+    if time_col is None:
+        time_col = cols[1] if len(cols) > 1 else "B"
+    if temp_col is None:
+        temp_col = cols[2] if len(cols) > 2 else "C"
+    if rh_col is None:
+        rh_col = cols[3] if len(cols) > 3 else "D"
+
+    records: list[tuple[datetime, float, float]] = []
+    for row_no in sorted(by_row):
+        if row_no == header_row:
+            continue
+        cells = by_row[row_no]
+        dt = _coerce_excel_datetime(cells.get(time_col))
+        if dt is None:
+            continue
+        try:
+            temp = float(cells[temp_col])
+            rh = float(cells[rh_col])
+        except (KeyError, TypeError, ValueError):
+            continue
+        records.append((dt, temp, rh))
+    return records
+
+
+def _parse_excel_openpyxl(data: bytes) -> list[tuple[datetime, float, float]]:
     import warnings
     from openpyxl import load_workbook
 
-    data = path.read_bytes()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        wb = load_workbook(BytesIO(data), data_only=True, read_only=True)
+        wb = load_workbook(BytesIO(data), data_only=True, read_only=False)
     try:
-        sheet = None
-        for name in wb.sheetnames:
-            if name.lower() in {"list", "data", "readings", "log"}:
-                sheet = wb[name]
-                break
-        if sheet is None:
-            sheet = wb[wb.sheetnames[min(1, len(wb.sheetnames) - 1)]]
-
-        # These logger exports declare a wrong sheet size, which truncates
-        # read-only iteration to the first cell unless the size is recomputed.
-        sheet.reset_dimensions()
-        rows = sheet.iter_rows(values_only=True)
-        header = next(rows, None)
-        if not header:
-            return []
-
-        time_i = temp_i = rh_i = None
-        for i, cell in enumerate(header):
-            label = str(cell or "").strip().lower()
-            if time_i is None and ("time" in label or "date" in label):
-                time_i = i
-            elif temp_i is None and ("temp" in label or "°c" in label or label in {"c", "℃"}):
-                temp_i = i
-            elif rh_i is None and ("humid" in label or "%rh" in label or "rh" in label):
-                rh_i = i
-
-        if time_i is None:
-            time_i = 1
-        if temp_i is None:
-            temp_i = 2
-        if rh_i is None:
-            rh_i = 3
-
-        records: list[tuple[datetime, float, float]] = []
-        for row in rows:
-            if not row or time_i >= len(row):
-                continue
-            raw_time = row[time_i]
-            dt = _coerce_excel_datetime(raw_time)
-            if dt is None:
-                continue
-            try:
-                temp = float(row[temp_i])
-                rh = float(row[rh_i]) if rh_i < len(row) and row[rh_i] not in (None, "") else None
-            except (TypeError, ValueError, IndexError):
-                continue
-            if rh is None:
-                continue
-            records.append((dt, temp, rh))
-        records.sort(key=lambda row: row[0])
-        return records
+        sheets = [wb[name] for name in wb.sheetnames if name.lower() in {"list", "data", "readings", "log"}]
+        if not sheets:
+            sheets = [wb[name] for name in wb.sheetnames]
+        best: list[tuple[datetime, float, float]] = []
+        for sheet in sheets:
+            records = _records_from_openpyxl_sheet(sheet)
+            if len(records) > len(best):
+                best = records
+        return best
     finally:
         wb.close()
+
+
+def _records_from_openpyxl_sheet(sheet) -> list[tuple[datetime, float, float]]:
+    rows = sheet.iter_rows(values_only=True)
+    header = next(rows, None)
+    if not header:
+        return []
+    time_i = temp_i = rh_i = None
+    for i, cell in enumerate(header):
+        label = str(cell or "").strip().lower()
+        if time_i is None and ("time" in label or "date" in label):
+            time_i = i
+        elif temp_i is None and ("temp" in label or "°c" in label or label in {"c", "℃"}):
+            temp_i = i
+        elif rh_i is None and ("humid" in label or "%rh" in label or "rh" in label):
+            rh_i = i
+    if time_i is None:
+        time_i = 1
+    if temp_i is None:
+        temp_i = 2
+    if rh_i is None:
+        rh_i = 3
+    records: list[tuple[datetime, float, float]] = []
+    for row in rows:
+        if not row or time_i >= len(row):
+            continue
+        dt = _coerce_excel_datetime(row[time_i])
+        if dt is None:
+            continue
+        try:
+            temp = float(row[temp_i])
+            rh = float(row[rh_i]) if rh_i < len(row) and row[rh_i] not in (None, "") else None
+        except (TypeError, ValueError, IndexError):
+            continue
+        if rh is None:
+            continue
+        records.append((dt, temp, rh))
+    return records
 
 
 def _coerce_excel_datetime(value) -> datetime | None:
