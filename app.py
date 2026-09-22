@@ -272,7 +272,8 @@ def api_batch_add(batch_id: str):
         name = _safe_upload_name(item.filename)
         if not name:
             continue
-        item.save(batch / name)
+        payload = item.read()
+        (batch / name).write_bytes(payload)
         added += 1
 
     total = sum(1 for _ in batch.iterdir())
@@ -325,7 +326,7 @@ def api_process():
             batch_dir = UPLOAD_DIR / uuid.uuid4().hex
             batch_dir.mkdir(parents=True, exist_ok=True)
         dest = batch_dir / name
-        item.save(dest)
+        dest.write_bytes(item.read())
         saved.append(dest)
 
     if folder:
@@ -339,6 +340,20 @@ def api_process():
     if not saved:
         message = "Choose your logger files first." if CLOUD_MODE else "Upload PDF files or enter a folder path."
         return jsonify({"ok": False, "error": message}), 400
+
+    tiny = [path for path in saved if path.stat().st_size < 10000]
+    if tiny and len(tiny) >= max(1, len(saved) // 2):
+        sample = tiny[0]
+        return jsonify(
+            {
+                "ok": False,
+                "error": (
+                    f"The browser did not send the real logger files. "
+                    f"{sample.name} is only {sample.stat().st_size} bytes. "
+                    "Use Choose a whole folder again, or drop the .xls files themselves."
+                ),
+            }
+        ), 400
 
     job_id = uuid.uuid4().hex
     _update_job(job_id, status="queued", current=0, total=len(saved), message="Queued")
@@ -358,7 +373,7 @@ def api_status(job_id: str):
 
 @app.get("/healthz")
 def healthz():
-    return "ok v8", 200
+    return "ok v9", 200
 
 
 @app.get("/download/<name>")

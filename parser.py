@@ -122,7 +122,10 @@ def parse_excel(path: Path) -> list[tuple[datetime, float, float]]:
         records = _parse_elitech_xlsx(data)
         if records:
             return records
-    return _parse_excel_openpyxl(data)
+    try:
+        return _parse_excel_openpyxl(data)
+    except Exception:
+        return []
 
 
 def _parse_elitech_xlsx(data: bytes) -> list[tuple[datetime, float, float]]:
@@ -139,7 +142,30 @@ def _parse_elitech_xlsx(data: bytes) -> list[tuple[datetime, float, float]]:
     return best
 
 
+_T_TEXT_RE = re.compile(r"<t[^>]*>(.*?)</t>", re.I | re.S)
+
+
+def _records_from_t_tags(xml: str) -> list[tuple[datetime, float, float]]:
+    texts = [unescape(text).strip() for text in _T_TEXT_RE.findall(xml)]
+    records: list[tuple[datetime, float, float]] = []
+    i = 0
+    while i < len(texts):
+        dt = _coerce_excel_datetime(texts[i])
+        if dt is not None and i + 2 < len(texts):
+            try:
+                records.append((dt, float(texts[i + 1]), float(texts[i + 2])))
+                i += 3
+                continue
+            except ValueError:
+                pass
+        i += 1
+    return records
+
+
 def _records_from_sheet_xml(xml: str) -> list[tuple[datetime, float, float]]:
+    records = _records_from_t_tags(xml)
+    if records:
+        return records
     by_row: dict[int, dict[str, str]] = {}
     for col, row, text in _INLINE_CELL_RE.findall(xml):
         by_row.setdefault(int(row), {})[col] = unescape(text)
@@ -296,8 +322,9 @@ def parse_one_worker(path_str: str):
         if not path.is_file():
             return logger, None, f"{path.name}: file missing on server"
         size = path.stat().st_size
-        if size < 200:
-            return logger, None, f"{path.name}: upload was empty ({size} bytes)"
+        magic = path.read_bytes()[:4]
+        if size < 10000:
+            return logger, None, f"{path.name}: upload too small ({size} bytes, {magic!r}). The real logger file was not sent."
         columns = parse_logger_columns(path)
         if columns[0]:
             return logger, columns, None
@@ -306,7 +333,7 @@ def parse_one_worker(path_str: str):
             columns = parse_logger_columns(sibling)
             if columns[0]:
                 return logger, columns, None
-        return logger, None, f"{path.name}: no temperature/humidity readings found"
+        return logger, None, f"{path.name}: no readings found ({size} bytes, {magic!r})"
     except Exception as exc:
         sibling = sibling_logger_file(path)
         if sibling is not None:

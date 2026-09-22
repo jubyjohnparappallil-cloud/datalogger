@@ -187,7 +187,7 @@
   <header>
     <div>
       <h1>Logger Data Separator</h1>
-      <p>Live on Render · upload the DL folder · keep this tab open · v8</p>
+      <p>Live on Render · upload the DL folder · keep this tab open · v9</p>
     </div>
   </header>
   <main>
@@ -346,11 +346,9 @@
     document.getElementById("showTemp").addEventListener("click", () => { sheet = "temp"; renderPreview(); });
     document.getElementById("showHum").addEventListener("click", () => { sheet = "rh"; renderPreview(); });
 
-    const UPLOAD_CHUNK = 15;
+    const UPLOAD_CHUNK = 8;
 
     async function uploadInBatches() {
-      // A whole DL folder is ~140 MB; sending it as one request is fragile,
-      // so files go up a handful at a time against one batch id.
       const res = await fetch("/api/batch", { method: "POST" });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || "Could not start upload");
@@ -359,7 +357,13 @@
       for (let i = 0; i < selectedFiles.length; i += UPLOAD_CHUNK) {
         const slice = selectedFiles.slice(i, i + UPLOAD_CHUNK);
         const data = new FormData();
-        slice.forEach((f) => data.append("files", f, f.name));
+        for (const file of slice) {
+          if (file.size < 10000) {
+            throw new Error(file.name + " is only " + file.size + " bytes. Choose the real DL folder.");
+          }
+          const buffer = await file.arrayBuffer();
+          data.append("files", new Blob([buffer], { type: "application/octet-stream" }), file.name);
+        }
         const up = await fetch("/api/batch/" + batchId, { method: "POST", body: data });
         const upJson = await up.json();
         if (!upJson.ok) throw new Error(upJson.error || "Upload failed");
