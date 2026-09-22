@@ -52,7 +52,8 @@ app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.jinja_env.auto_reload = True
 
 DEFAULT_FOLDER = r"C:\Users\Juby John\Downloads\Aramax WH\Aramax WH"
-WORKERS = min(12, max(4, os.cpu_count() or 4))
+# Render Free is 512 MB. Many parse processes will get the service killed.
+WORKERS = 2 if CLOUD_MODE else min(12, max(4, os.cpu_count() or 4))
 
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
@@ -106,25 +107,31 @@ def run_job(job_id: str, files: list[Path], batch_dir: Path | None = None) -> No
         file_columns: dict[str, tuple] = {}
         warnings: list[str] = []
 
-        ctx = multiprocessing.get_context("spawn")
-        with ProcessPoolExecutor(max_workers=WORKERS, mp_context=ctx) as pool:
-            futures = {pool.submit(parse_one_worker, str(path)): path for path in files}
-            done = 0
-            for future in as_completed(futures):
-                logger, columns, error = future.result()
-                done += 1
-                path = futures[future]
-                if error:
-                    warnings.append(error)
-                else:
-                    file_columns[logger] = columns
-                _update_job(
-                    job_id,
-                    current=done,
-                    message=f"Parsed {done}/{len(files)}: {path.name}",
-                )
-                if done == 1 or done % 10 == 0 or done == len(files):
-                    print(f"Parsed {done}/{len(files)}: {path.name}", flush=True)
+        done = 0
+
+        def _take_result(logger, columns, error, path):
+            nonlocal done
+            done += 1
+            if error:
+                warnings.append(error)
+            else:
+                file_columns[logger] = columns
+            _update_job(job_id, current=done, message=f"Parsed {done}/{len(files)}: {path.name}")
+            if done == 1 or done % 10 == 0 or done == len(files):
+                print(f"Parsed {done}/{len(files)}: {path.name}", flush=True)
+
+        try:
+            ctx = multiprocessing.get_context("spawn")
+            with ProcessPoolExecutor(max_workers=WORKERS, mp_context=ctx) as pool:
+                futures = {pool.submit(parse_one_worker, str(path)): path for path in files}
+                for future in as_completed(futures):
+                    logger, columns, error = future.result()
+                    _take_result(logger, columns, error, futures[future])
+        except Exception as exc:
+            print(f"process pool unavailable ({exc}); reading files here instead", flush=True)
+            for path in files:
+                logger, columns, error = parse_one_worker(str(path))
+                _take_result(logger, columns, error, path)
 
         if not file_columns:
             _update_job(job_id, status="error", error="Could not extract readings from the uploaded files.", warnings=warnings)
@@ -324,7 +331,7 @@ def api_status(job_id: str):
 
 @app.get("/healthz")
 def healthz():
-    return "ok v3", 200
+    return "ok v4", 200
 
 
 @app.get("/download/<name>")

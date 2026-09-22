@@ -187,7 +187,7 @@
   <header>
     <div>
       <h1>Logger Data Separator</h1>
-      <p>Bulk PDF / Excel upload → one workbook with Temperature and Humidity sheets · v3 faster Excel</p>
+      <p>Live on Render · upload the DL folder · keep this tab open · v4</p>
     </div>
   </header>
   <main>
@@ -195,8 +195,9 @@
       <h2>1. Choose all your DL files</h2>
       <p class="hint">
         {% if cloud_mode %}
-        Pick every logger file (<b>DL 01, DL 02, … DL 272</b>) — PDF and Excel together is fine.
-        Use <b>Choose a whole folder</b> to send the entire DL folder in one go.
+        Click <b>Choose a whole folder</b> and pick the folder that has <b>DL 01, DL 02, …</b>
+        Excel twins are skipped automatically, so only one file per logger is uploaded.
+        A full set can take several minutes on this host. <b>Keep this tab open</b> until Download Excel appears.
         {% else %}
         Paste the folder that holds every logger (<b>DL 01, DL 02, … DL 272</b>, PDF and Excel together is fine).
         {% endif %}
@@ -278,23 +279,43 @@
     let lastPreview = null;
     let sheet = "temp";
 
+    function loggerKey(name) {
+      const match = name.match(/dl[\s._-]*(\d+)/i);
+      return match ? "dl-" + String(parseInt(match[1], 10)) : name.replace(/\.(pdf|xls|xlsx)$/i, "").toLowerCase();
+    }
+    function preferPdf(fileList) {
+      const byKey = new Map();
+      for (const file of fileList) {
+        if (!/\.(pdf|xls|xlsx)$/i.test(file.name)) continue;
+        const key = loggerKey(file.name);
+        const current = byKey.get(key);
+        if (!current || (/\.pdf$/i.test(file.name) && !/\.pdf$/i.test(current.name))) {
+          byKey.set(key, file);
+        }
+      }
+      return [...byKey.values()];
+    }
+    function setFiles(fileList, extra) {
+      selectedFiles = preferPdf(fileList);
+      fileSummary.textContent = selectedFiles.length
+        ? selectedFiles.length + " loggers ready" + (extra || "")
+        : "No logger files found.";
+    }
+
     drop.addEventListener("click", () => fileInput.click());
     drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("drag"); });
     drop.addEventListener("dragleave", () => drop.classList.remove("drag"));
     drop.addEventListener("drop", (e) => {
       e.preventDefault();
       drop.classList.remove("drag");
-      selectedFiles = [...e.dataTransfer.files];
-      fileSummary.textContent = selectedFiles.length + " file(s) selected";
+      setFiles(e.dataTransfer.files);
     });
     fileInput.addEventListener("change", () => {
-      selectedFiles = [...fileInput.files];
-      fileSummary.textContent = selectedFiles.length + " file(s) selected — all will become DL columns";
+      setFiles(fileInput.files, " — each becomes one DL column");
     });
     folderBtn.addEventListener("click", () => dirInput.click());
     dirInput.addEventListener("change", () => {
-      selectedFiles = [...dirInput.files].filter((f) => /\.(pdf|xls|xlsx)$/i.test(f.name));
-      fileSummary.textContent = selectedFiles.length + " DL file(s) from folder — all will be used";
+      setFiles(dirInput.files, " from folder (Excel twins skipped)");
     });
 
     runBtn.addEventListener("click", startJob);
@@ -369,7 +390,7 @@
           runBtn.disabled = false;
           return;
         }
-        statusText.textContent = "Reading loggers in parallel. Keep this page open.";
+        statusText.textContent = "Reading logger files. Keep this tab open.";
         poll(json.job_id);
       } catch (err) {
         errorText.textContent = err.message || String(err);
