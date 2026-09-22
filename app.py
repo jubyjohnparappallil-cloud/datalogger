@@ -59,6 +59,15 @@ JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
 
 
+def _safe_upload_name(filename: str) -> str | None:
+    name = Path(str(filename).replace("\\", "/")).name
+    if Path(name).suffix.lower() not in {".pdf", ".xls", ".xlsx"}:
+        return None
+    if not DL_NAME_RE.search(Path(name).stem):
+        return None
+    return name
+
+
 def _clean(value: float) -> float | None:
     """JSON has no NaN, so blank readings go out as null."""
     return None if math.isnan(value) else round(value, 1)
@@ -98,9 +107,10 @@ def _dedupe_prefer_pdf(files: list[Path]) -> list[Path]:
 
 def run_job(job_id: str, files: list[Path], batch_dir: Path | None = None) -> None:
     try:
+        files = [path for path in files if DL_NAME_RE.search(path.stem)]
         files = _dedupe_prefer_pdf(files)
         if not files:
-            _update_job(job_id, status="error", error="No PDF or Excel logger files found.")
+            _update_job(job_id, status="error", error="No PDF or Excel logger files found. Upload files named like DL 01, DL 02.")
             return
 
         _update_job(job_id, status="running", total=len(files), current=0, message="Reading logger files...")
@@ -120,21 +130,33 @@ def run_job(job_id: str, files: list[Path], batch_dir: Path | None = None) -> No
             if done == 1 or done % 10 == 0 or done == len(files):
                 print(f"Parsed {done}/{len(files)}: {path.name}", flush=True)
 
-        try:
-            ctx = multiprocessing.get_context("spawn")
-            with ProcessPoolExecutor(max_workers=WORKERS, mp_context=ctx) as pool:
-                futures = {pool.submit(parse_one_worker, str(path)): path for path in files}
-                for future in as_completed(futures):
-                    logger, columns, error = future.result()
-                    _take_result(logger, columns, error, futures[future])
-        except Exception as exc:
-            print(f"process pool unavailable ({exc}); reading files here instead", flush=True)
+        if CLOUD_MODE:
             for path in files:
-                logger, columns, error = parse_one_worker(str(path))
+                logger, columns, error = parse_one_worker(str(path.resolve()))
                 _take_result(logger, columns, error, path)
+        else:
+            try:
+                ctx = multiprocessing.get_context("spawn")
+                with ProcessPoolExecutor(max_workers=WORKERS, mp_context=ctx) as pool:
+                    futures = {pool.submit(parse_one_worker, str(path.resolve())): path for path in files}
+                    for future in as_completed(futures):
+                        logger, columns, error = future.result()
+                        _take_result(logger, columns, error, futures[future])
+            except Exception as exc:
+                print(f"process pool unavailable ({exc}); reading files here instead", flush=True)
+                for path in files:
+                    logger, columns, error = parse_one_worker(str(path.resolve()))
+                    _take_result(logger, columns, error, path)
 
         if not file_columns:
-            _update_job(job_id, status="error", error="Could not extract readings from the uploaded files.", warnings=warnings)
+            detail = warnings[0] if warnings else "The files had no DATE / Time / temperature / humidity rows."
+            extra = f" ({len(warnings)} files)" if len(warnings) > 1 else ""
+            _update_job(
+                job_id,
+                status="error",
+                error=f"Could not extract readings.{extra} {detail}",
+                warnings=warnings,
+            )
             return
 
         _update_job(job_id, message="Aligning timestamps and splitting Temperature / Humidity...")
@@ -242,8 +264,8 @@ def api_batch_add(batch_id: str):
     for item in request.files.getlist("files"):
         if not item.filename:
             continue
-        name = Path(item.filename).name
-        if Path(name).suffix.lower() not in {".pdf", ".xls", ".xlsx"}:
+        name = _safe_upload_name(item.filename)
+        if not name:
             continue
         item.save(batch / name)
         added += 1
@@ -291,8 +313,8 @@ def api_process():
     for item in request.files.getlist("files"):
         if not item.filename:
             continue
-        name = Path(item.filename).name
-        if Path(name).suffix.lower() not in {".pdf", ".xls", ".xlsx"}:
+        name = _safe_upload_name(item.filename)
+        if not name:
             continue
         if batch_dir is None:
             batch_dir = UPLOAD_DIR / uuid.uuid4().hex
@@ -331,7 +353,7 @@ def api_status(job_id: str):
 
 @app.get("/healthz")
 def healthz():
-    return "ok v5", 200
+    return "ok v6", 200
 
 
 @app.get("/download/<name>")

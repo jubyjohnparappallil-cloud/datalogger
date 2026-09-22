@@ -80,7 +80,10 @@ def parse_pdf_columns(path: Path) -> tuple[array, array, array]:
     doc = pymupdf.open(path)
     try:
         for page in doc:
-            _append_text_rows(page.get_text("text", flags=TEXT_FLAGS) or "", minutes, temps, hums)
+            before = len(minutes)
+            _append_text_rows(page.get_text("text") or "", minutes, temps, hums)
+            if len(minutes) == before:
+                _append_text_rows(page.get_text("text", flags=TEXT_FLAGS) or "", minutes, temps, hums)
     finally:
         doc.close()
     return minutes, temps, hums
@@ -198,10 +201,17 @@ def sibling_logger_file(path: Path) -> Path | None:
 
 
 def parse_one_worker(path_str: str):
-    """Process-pool entry: parse one logger file into compact arrays."""
+    """Parse one logger file into compact arrays."""
     path = Path(path_str)
     logger = logger_column_name(path)
+    if not DL_NAME_RE.search(path.stem):
+        return logger, None, f"{path.name}: skipped (not a DL logger file)"
     try:
+        if not path.is_file():
+            return logger, None, f"{path.name}: file missing on server"
+        size = path.stat().st_size
+        if size < 200:
+            return logger, None, f"{path.name}: upload was empty ({size} bytes)"
         columns = parse_logger_columns(path)
         if columns[0]:
             return logger, columns, None
