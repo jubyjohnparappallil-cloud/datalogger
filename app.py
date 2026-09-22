@@ -331,7 +331,7 @@ def api_status(job_id: str):
 
 @app.get("/healthz")
 def healthz():
-    return "ok v4", 200
+    return "ok v5", 200
 
 
 @app.get("/download/<name>")

@@ -58,12 +58,13 @@ _STYLES = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
     <numFmt numFmtId="166" formatCode="0.0"/>
   </numFmts>
   <fonts count="2">
-    <font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font>
+    <font><sz val="11"/><color rgb="FF000000"/><name val="Calibri"/><family val="2"/></font>
     <font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/><family val="2"/></font>
   </fonts>
-  <fills count="2">
+  <fills count="3">
     <fill><patternFill patternType="none"/></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FF305496"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF305496"/><bgColor rgb="FF305496"/></patternFill></fill>
   </fills>
   <borders count="1">
     <border><left/><right/><top/><bottom/><diagonal/></border>
@@ -72,7 +73,7 @@ _STYLES = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <cellXfs count="5">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
     <xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
-    <xf numFmtId="0" fontId="1" fillId="1" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
     <xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
     <xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
   </cellXfs>
@@ -188,7 +189,7 @@ def _stream_sheet(
             header_cells.append(
                 f'<c r="{letters[i]}1" t="inlineStr" s="2"><is><t>{escape(name)}</t></is></c>'
             )
-        write(f'<row r="1" s="2" customFormat="1" ht="20">{"".join(header_cells)}</row>'.encode("utf-8"))
+        write(f'<row r="1" ht="20" customHeight="1">{"".join(header_cells)}</row>'.encode("utf-8"))
 
         buf: list[str] = []
         for row_i, (excel_date, excel_time) in enumerate(zip(excel_dates, excel_times)):
